@@ -31,11 +31,11 @@ reddit = praw.Reddit(client_id=REDDITAPPID,
 
 API_URL_REDGIFS = 'https://api.redgifs.com/v2/gifs/'
 
-# logging.basicConfig(filename='/home/raspberry/Desktop/Archive/archive.log', encoding='utf-8', level=logging.INFO)
-logging.basicConfig(filename='/home/raspberry/Desktop/Archive/archive.log', encoding='utf-8', level=logging.INFO, filemode = 'w')
+# logging.basicConfig(filename='/home/ubuntu/Desktop/Archive/archive.log', encoding='utf-8', level=logging.INFO)
+logging.basicConfig(filename='/home/ubuntu/Desktop/Archive/archive.log', encoding='utf-8', level=logging.INFO, filemode = 'w')
 
 sys.stdout.reconfigure(encoding='utf-8')
-os.chdir("/home/raspberry/Desktop/Archive/")
+os.chdir("/home/ubuntu/Desktop/Archive/")
 
 # logging.basicConfig(filename='archive.log', encoding='utf-8', level=logging.INFO, filemode = 'w')
 
