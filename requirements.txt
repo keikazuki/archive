@@ -1,0 +1,9 @@
+psycopg2
+praw
+prawcore
+requests
+opencv-python
+Pillow
+imgurpython
+beautifulsoup4
+redgifs
