@@ -1,0 +1,37 @@
+# -*- coding: utf-8 -*-
+
+'''
+List of All Configurations
+'''
+
+'''
+#Reddit configuration for SauceSharingBOT
+USERNAME        = 'SauceSharingBOT'
+PASSWORD        = 'mastervenki99'
+USERAGENT       = 'SauceSharingBOT (by /u/kei-kazuki)'
+REDDITAPPID     = 'KfjSVPMVN2chKQ'
+REDDITAPPSECRET = 'qCjus49r5BIbux-LocGl4RzFz48'
+'''
+
+#Reddit configuration for DoujinStash
+USERNAME        = 'DoujinStash'
+PASSWORD        = 'mastervenki99'
+USERAGENT       = 'DoujinStash (by /u/Pervtakus)'
+REDDITAPPID     = 'HgKCZjuV7uu4IVAv_zmkAQ'
+REDDITAPPSECRET = 'xnsavxoeKW9_fa5WzD7fAkwacM0AMQ'
+
+
+#Postgresql configuration
+DBNAME          = 'SauceMaster'
+DBUSER          = 'postgres'
+DBHOST          = '127.0.0.1'
+DBPASSWORD      = 'shakimom'
+DBPORT          = '5081'
+
+#Imgur configuration
+IMGUR_CLIENTID      = 'c5978a36b06f083'
+IMGUR_CLIENTSECRET  = 'cc47ca093ba9f2497f8a43798e3f14b7410b8fd3'
+
+def getSignature():
+    signature = '\n\n---\n\n^Tag the BOT to check reposts | Link {anime}, <manga>, ]LN[, |VN| | [Subreddit](https://www.reddit.com/r/SauceSharingCommunity/) | [FAQ](https://www.reddit.com/r/SauceSharingCommunity/wiki/index/saucesharingbot)'
+    return signature.replace(' ', '&#32;')
