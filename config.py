@@ -26,7 +26,7 @@ DBNAME          = 'SauceMaster'
 DBUSER          = 'postgres'
 DBHOST          = '127.0.0.1'
 DBPASSWORD      = 'shakimom'
-DBPORT          = '5081'
+DBPORT          = '5432'
 
 #Imgur configuration
 IMGUR_CLIENTID      = 'c5978a36b06f083'
