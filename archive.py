@@ -31,13 +31,17 @@ reddit = praw.Reddit(client_id=REDDITAPPID,
 
 API_URL_REDGIFS = 'https://api.redgifs.com/v2/gifs/'
 
-# logging.basicConfig(filename='/home/ubuntu/Desktop/Archive/archive.log', encoding='utf-8', level=logging.INFO)
-logging.basicConfig(filename='/home/ubuntu/Desktop/Archive/archive.log', encoding='utf-8', level=logging.INFO, filemode = 'w')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+log_path = os.path.join(BASE_DIR, 'archivelimit.log')
+logging.basicConfig(
+    filename=log_path,
+    encoding='utf-8',
+    level=logging.INFO,
+    filemode='w'  # 'a' to append, 'w' to overwrite each time
+)
 
 sys.stdout.reconfigure(encoding='utf-8')
-os.chdir("/home/ubuntu/Desktop/Archive/")
-
-# logging.basicConfig(filename='archive.log', encoding='utf-8', level=logging.INFO, filemode = 'w')
+os.chdir(BASE_DIR)
 
 def convertDateFormat(timestamp):
     return str(time.strftime('%B %d, %Y - %H:%M:%S', time.localtime(timestamp)))
@@ -371,7 +375,7 @@ def get_redgifs_embedded_video_url(redgifs_url, submission):
 def get_redgifs_embedded_video_url(redgifs_url, submission):
     try:
         #Get RedGifs video ID
-        redgifs_ID = re.search("(\/watch\/)\w+", redgifs_url)
+        redgifs_ID = re.search(r"(\/watch\/)\w+", redgifs_url)
         redgifs_ID = redgifs_ID.group()[7:]
         
         hash            = []
