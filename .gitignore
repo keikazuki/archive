@@ -3,6 +3,12 @@
 *.log
 *_media_file.*
 ToPostNext/
+archive/
+archivelimit/
+repostchecker/
+respostchecker_pornhwa/
+saucenaobot/
+sourceacquiredbot/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
