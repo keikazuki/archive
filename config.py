@@ -5,11 +5,11 @@ List of All Configurations
 '''
 
 #Reddit configuration for DoujinStash
-USERNAME        = 'kei-kazuki'
-PASSWORD        = 'beyf6QAaDKA8#$X7'
-USERAGENT       = 'web:com.edu.lab:v1.6.0 (by /u/kei-kazuki)'
-REDDITAPPID     = 'IT4XqKkD7AF8xo6elro6jw'
-REDDITAPPSECRET = 'u7sO_5n37PI8fn5mL2KocA9kFfz_sg'
+USERNAME        = 'PERVTAKUS'
+PASSWORD        = 'mastervenki99'
+USERAGENT       = 'web:com.edu.lab:v1.5.8 (by /u/PERVTAKUS)'
+REDDITAPPID     = 'mTZx1ZZZQHRsgQ'
+REDDITAPPSECRET = 'mfvGyhx8dZ-8eo1w5g1mz7ANsn8'
 
 
 #Postgresql configuration
