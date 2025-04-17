@@ -782,5 +782,6 @@ if __name__ == '__main__':
         try:
             start()
         except Exception as e:
+            traceback.print_exc()
             logging.warning("\t  Error in __main__ \t Error= {0}".format(e))
             pass
