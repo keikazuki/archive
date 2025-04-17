@@ -32,7 +32,7 @@ reddit = praw.Reddit(client_id=REDDITAPPID,
 API_URL_REDGIFS = 'https://api.redgifs.com/v2/gifs/'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-log_path = os.path.join(BASE_DIR, 'archivelimit.log')
+log_path = os.path.join(BASE_DIR, 'archive.log')
 logging.basicConfig(
     filename=log_path,
     encoding='utf-8',
