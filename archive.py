@@ -770,6 +770,7 @@ def start():
     for submission in subreddits.stream.submissions(pause_after=0):
         if submission:
            indexSubmission(submission)
+           time.sleep(1) # Avoid Too Many Request error so; Add delay between processing submission
 
 if __name__ == '__main__':
     # ------------------------------------#
