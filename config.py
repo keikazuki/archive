@@ -14,11 +14,11 @@ REDDITAPPSECRET = 'qCjus49r5BIbux-LocGl4RzFz48'
 '''
 
 #Reddit configuration for DoujinStash
-USERNAME        = 'kei-kazuki'
-PASSWORD        = 'beyf6QAaDKA8#$X7'
+USERNAME        = 'DoujinStash'
+PASSWORD        = 'mastervenki99'
 USERAGENT       = 'android:com.uni.labtracker:v1.6.0 (by /u/kei-kazuki)'
-REDDITAPPID     = 'IT4XqKkD7AF8xo6elro6jw'
-REDDITAPPSECRET = 'u7sO_5n37PI8fn5mL2KocA9kFfz_sg'
+REDDITAPPID     = 'HgKCZjuV7uu4IVAv_zmkAQ'
+REDDITAPPSECRET = 'xnsavxoeKW9_fa5WzD7fAkwacM0AMQ'
 
 
 #Postgresql configuration
