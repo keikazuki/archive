@@ -777,7 +777,6 @@ if __name__ == '__main__':
     
     # Loop the submission stream until the Reddit access token expires.
     # Then get a new access token and start the stream again.
-    time.sleep(900)
     while 1:
         try:
             start()
