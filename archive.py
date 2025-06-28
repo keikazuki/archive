@@ -38,7 +38,10 @@ logging.basicConfig(
     encoding='utf-8',
     level=logging.INFO,
     filemode='w'  # 'a' to append, 'w' to overwrite each time
+    format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
+logger = logging.getLogger("archive")
 
 sys.stdout.reconfigure(encoding='utf-8')
 os.chdir(BASE_DIR)
@@ -734,7 +737,7 @@ def indexSubmission(submission):
         if databasehandler.submissionExists(submission.id):
             return
         
-        logging.info("\t Processing: \t https://reddit.com{0}".format(submission.permalink))
+        logger.info(f"Processing submission: https://reddit.com{submission.permalink}")
         
         #Start Indexing Image
         if is_direct_link_to_content(submission):
