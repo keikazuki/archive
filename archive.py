@@ -37,7 +37,7 @@ logging.basicConfig(
     filename=log_path,
     encoding='utf-8',
     level=logger.INFO,
-    filemode='w'  # 'a' to append, 'w' to overwrite each time
+    filemode='w',  # 'a' to append, 'w' to overwrite each time
     format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
