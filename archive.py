@@ -36,10 +36,10 @@ log_path = os.path.join(BASE_DIR, 'archive.log')
 logging.basicConfig(
     filename=log_path,
     encoding='utf-8',
-    level=logger.INFO,
+    level=logging.INFO,
     filemode='w',  # 'a' to append, 'w' to overwrite each time
-    format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%y-%m-%d %H:%M'
 )
 logger = logging.getLogger("archive")
 
@@ -737,7 +737,7 @@ def indexSubmission(submission):
         if databasehandler.submissionExists(submission.id):
             return
         
-        logger.info(f"Processing submission: https://reddit.com{submission.permalink}")
+        logger.info(f"\t Processing: https://reddit.com{submission.permalink}")
         
         #Start Indexing Image
         if is_direct_link_to_content(submission):
