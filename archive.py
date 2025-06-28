@@ -33,15 +33,15 @@ API_URL_REDGIFS = 'https://api.redgifs.com/v2/gifs/'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 log_path = os.path.join(BASE_DIR, 'archive.log')
-logging.basicConfig(
+logger.basicConfig(
     filename=log_path,
     encoding='utf-8',
-    level=logging.INFO,
+    level=logger.INFO,
     filemode='w'  # 'a' to append, 'w' to overwrite each time
     format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-logger = logging.getLogger("archive")
+logger = logger.getLogger("archive")
 
 sys.stdout.reconfigure(encoding='utf-8')
 os.chdir(BASE_DIR)
@@ -126,7 +126,7 @@ def getMediaData(url, submission, image):
         return mediaData
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t Error in getMediaData \t Error= {0}".format(e))
+        logger.warning("\t Error in getMediaData \t Error= {0}".format(e))
         return
 
 def getSubmissionData(mediaprocessed, submission):
@@ -150,7 +150,7 @@ def getSubmissionData(mediaprocessed, submission):
         return submissionData
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t Error in getSubmissionData \t Error= {0}".format(e))
+        logger.warning("\t Error in getSubmissionData \t Error= {0}".format(e))
         return
 
 def add_DB_Record(submission, mediaData):
@@ -228,7 +228,7 @@ def getVideoMediaData(video_url, submission):
         return mediaData
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in getVideoMediaData \t Error= {0}".format(e))
+        logger.warning("\t  Error in getVideoMediaData \t Error= {0}".format(e))
         return
 
 def get_gfycat_embedded_video_url(url):
@@ -256,7 +256,7 @@ def get_gfycat_embedded_video_url(url):
                     thumbs_url       = src_url
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in get_gfycat_embedded_video_url \t Error= {0}".format(e))
+        logger.warning("\t  Error in get_gfycat_embedded_video_url \t Error= {0}".format(e))
         return
     
     if giant_url_found:
@@ -287,7 +287,7 @@ def get_redgifs_embedded_video_url(url):
                 return
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in get_redgifs_embedded_video_url \t Error= {0}".format(e))
+        logger.warning("\t  Error in get_redgifs_embedded_video_url \t Error= {0}".format(e))
         return
 '''
 
@@ -371,7 +371,7 @@ def get_redgifs_embedded_video_url(redgifs_url, submission):
             return
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in get_redgifs_embedded_video_url \t Error= {0}".format(e))
+        logger.warning("\t  Error in get_redgifs_embedded_video_url \t Error= {0}".format(e))
         return
 '''
 
@@ -441,7 +441,7 @@ def get_redgifs_embedded_video_url(redgifs_url, submission):
             return
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in get_redgifs_embedded_video_url \t Error= {0}".format(e))
+        logger.warning("\t  Error in get_redgifs_embedded_video_url \t Error= {0}".format(e))
         return
 
 def getImgurAlbumMediaData(images, submission):
@@ -461,7 +461,7 @@ def getImgurAlbumMediaData(images, submission):
         return mediaData
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in getImgurAlbumMediaData \t Error= {0}".format(e))
+        logger.warning("\t  Error in getImgurAlbumMediaData \t Error= {0}".format(e))
         return
 
 def getGifMediaData(url, submission):
@@ -512,7 +512,7 @@ def getGifMediaData(url, submission):
         return mediaData
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in getGifMediaData \t Error= {0}".format(e))
+        logger.warning("\t  Error in getGifMediaData \t Error= {0}".format(e))
         return
 
 def getRedditGalleryMediaData(submission):
@@ -531,7 +531,7 @@ def getRedditGalleryMediaData(submission):
         return mediaData     
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in getRedditGalleryMediaData \t Error= {0}".format(e))
+        logger.warning("\t  Error in getRedditGalleryMediaData \t Error= {0}".format(e))
         return
 
 
@@ -540,7 +540,7 @@ def is_reddit_video(submission):
     try:
         url = submission.url
         if "v.redd.it" in url:
-            logging.info("\t Submission is a reddit video.")
+            logger.info("\t Submission is a reddit video.")
             
             video_url = url + '/DASH_360.mp4'
             
@@ -551,7 +551,7 @@ def is_reddit_video(submission):
             add_DB_Record(submission, mediaData)
             return True
         elif url.lower().endswith(".mp4"):
-            logging.info("\t Submission is a direct video.")
+            logger.info("\t Submission is a direct video.")
             
             #Get mediaData
             mediaData = getVideoMediaData(url, submission)
@@ -563,14 +563,14 @@ def is_reddit_video(submission):
             return False
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in is_reddit_video \t Error= {0}".format(e))
+        logger.warning("\t  Error in is_reddit_video \t Error= {0}".format(e))
         return False
 
 def is_gfycat_link(submission):
     try:
         url = submission.url
         if "gfycat.com/" in url:
-            logging.info("\t Submission is a gfycat link.")
+            logger.info("\t Submission is a gfycat link.")
             
             #Get embedded gfycat video | video_url should end with .mp4
             video_url = get_gfycat_embedded_video_url(url)
@@ -590,14 +590,14 @@ def is_gfycat_link(submission):
             return False
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in is_gfycat_link \t Error= {0}".format(e))
+        logger.warning("\t  Error in is_gfycat_link \t Error= {0}".format(e))
         return False
 
 def is_redgifs_link(submission):
     try:
         url = submission.url
         if "redgifs.com/" in url:
-            logging.info("\t Submission is a redgifs link.")
+            logger.info("\t Submission is a redgifs link.")
             
             #Get embedded redgifs video | video_url should end with .mp4
             mediaData = get_redgifs_embedded_video_url(url, submission)
@@ -614,14 +614,14 @@ def is_redgifs_link(submission):
             return False
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in is_redgifs_link \t Error= {0}".format(e))
+        logger.warning("\t  Error in is_redgifs_link \t Error= {0}".format(e))
         return False
 
 def is_imgur_album(submission):
     try:
         url = str(submission.url.replace("m.imgur.com","i.imgur.com"))
         if "imgur.com/a/" in  url:
-            logging.info("\t Submission is an Imgur Album")
+            logger.info("\t Submission is an Imgur Album")
             
             #Get Imgur album ID
             album_id = url.split("imgur.com/a/")[-1]
@@ -638,14 +638,14 @@ def is_imgur_album(submission):
             return False
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in is_imgur_album \t Error= {0}".format(e))
+        logger.warning("\t  Error in is_imgur_album \t Error= {0}".format(e))
         return False
 
 def is_direct_link_to_gif(submission):
     try:
         url = submission.url
         if url.lower().endswith(".gif"):
-            logging.info("\t Submission is a GIF.")                                      
+            logger.info("\t Submission is a GIF.")                                      
             
             #Get mediaData
             mediaData = getGifMediaData(url, submission)
@@ -654,7 +654,7 @@ def is_direct_link_to_gif(submission):
             add_DB_Record(submission, mediaData)
             return True
         elif url.lower().endswith(".gifv"):
-            logging.info("\t Submission is a GIFV.")
+            logger.info("\t Submission is a GIFV.")
             url = str(url.replace(".gifv",".mp4"))
             
             #Get mediaData
@@ -667,13 +667,13 @@ def is_direct_link_to_gif(submission):
             return False
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in is_direct_link_to_gif \t Error= {0}".format(e))
+        logger.warning("\t  Error in is_direct_link_to_gif \t Error= {0}".format(e))
         return False
 
 def is_reddit_gallery(submission):
     try:
         if "reddit.com/gallery" in submission.url:
-            logging.info("\t Submission is a gallery.")
+            logger.info("\t Submission is a gallery.")
             
             #Get mediaData
             mediaData = getRedditGalleryMediaData(submission)
@@ -685,7 +685,7 @@ def is_reddit_gallery(submission):
             return False
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in is_reddit_gallery \t Error= {0}".format(e))
+        logger.warning("\t  Error in is_reddit_gallery \t Error= {0}".format(e))
         return False
 
 def is_direct_link_to_content(submission):
@@ -720,7 +720,7 @@ def is_direct_link_to_content(submission):
             return False
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in is_direct_link_to_content \t Error= {0}".format(e))
+        logger.warning("\t  Error in is_direct_link_to_content \t Error= {0}".format(e))
         return False
 
 def indexSubmission(submission):
@@ -756,7 +756,7 @@ def indexSubmission(submission):
             pass
     except Exception as e:
         traceback.print_exc()
-        logging.warning("\t  Error in indexSubmission \t Error= {0}".format(e))
+        logger.warning("\t  Error in indexSubmission \t Error= {0}".format(e))
 
 def start():
     """ The main function """
@@ -784,5 +784,5 @@ if __name__ == '__main__':
         try:
             start()
         except Exception as e:
-            logging.warning("\t  Error in __main__ \t Error= {0}".format(e))
+            logger.warning("\t  Error in __main__ \t Error= {0}".format(e))
             pass
