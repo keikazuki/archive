@@ -33,7 +33,7 @@ API_URL_REDGIFS = 'https://api.redgifs.com/v2/gifs/'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 log_path = os.path.join(BASE_DIR, 'archive.log')
-logger.basicConfig(
+logging.basicConfig(
     filename=log_path,
     encoding='utf-8',
     level=logger.INFO,
@@ -41,7 +41,7 @@ logger.basicConfig(
     format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-logger = logger.getLogger("archive")
+logger = logging.getLogger("archive")
 
 sys.stdout.reconfigure(encoding='utf-8')
 os.chdir(BASE_DIR)
