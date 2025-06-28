@@ -36,7 +36,7 @@ log_path = os.path.join(BASE_DIR, 'archive.log')
 logging.basicConfig(
     filename=log_path,
     encoding='utf-8',
-    level=logging.INFO,
+    # level=logging.INFO,
     filemode='w',  # 'a' to append, 'w' to overwrite each time
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%y-%m-%d %H:%M'
