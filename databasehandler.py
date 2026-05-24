@@ -7,8 +7,21 @@ import psycopg2
 import traceback
 import logging
 import time
+from psycopg2.extras import execute_values
 
 logger = logging.getLogger("archive")
+
+MEDIA_INSERT_QUERY = """
+INSERT INTO media(hash, submission_id, subreddit, frame_number, frame_count, frame_width, frame_height, total_pixels, file_size)
+VALUES %s
+ON CONFLICT DO NOTHING;
+"""
+
+SUBMISSION_INSERT_QUERY = """
+INSERT INTO submissions(id, subreddit, timestamp, author, title, url, comments, score, deleted, processed)
+VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (id) DO NOTHING;
+"""
 
 DBNAME      = ''
 DBUSER      = ''
@@ -26,7 +39,7 @@ try:
     DBPORT = config.DBPORT
 except ImportError:
     pass
-    
+
 try:
     conn = psycopg2.connect(
     user=DBUSER,
@@ -49,10 +62,10 @@ def submissionExists(submissionid):
     """
     Returns true if the submission exists inside table.
     """
-    query = "SELECT * FROM submissions WHERE id =\'{0}\';".format(submissionid)
-    
+    query = "SELECT 1 FROM submissions WHERE id = %s LIMIT 1;"
+
     try:
-        cur.execute(query)
+        cur.execute(query, (submissionid,))
         exists = (cur.fetchone()) is not None
         logger.debug(f"\t [DB] Submission {submissionid} exists: {exists}")
         return exists
@@ -60,14 +73,14 @@ def submissionExists(submissionid):
         traceback.print_exc()
         logger.warning(f"\t [DB] Failed to check submission {submissionid}: {e}")
         return True
-        
+
 def getArchieveSubredditsList():
     """
     List of subreddits to index in background (reads posts and index images/gifs/videos) Will not comment for these subreddits
     """
     start_time = time.time()
     query = "SELECT subreddit FROM indexsubreddits;"
-    
+
     try:
         sublist = []
         cur.execute(query)
@@ -84,14 +97,14 @@ def getArchieveSubredditsList():
         traceback.print_exc()
         logger.warning(f"\t [DB] Failed to load archive subreddits: {e}")
         return
-    
+
 def getRepostCheckerList():
     """
     List of subreddits to index in background (reads posts and index images/gifs/videos) Will comment for these subreddits
     """
     start_time = time.time()
     query = "SELECT subreddit FROM checksubreddits;"
-    
+
     try:
         sublist = []
         cur.execute(query)
@@ -113,12 +126,11 @@ def addSubmission(submissionData):
     """
     Adds a submission record into Submissions Table.
     """
-    query = "INSERT INTO submissions(id, subreddit, timestamp, author, title, url, comments, score, deleted, processed) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);"
     submission_id = submissionData[0] if submissionData else "unknown"
     subreddit = submissionData[1] if submissionData and len(submissionData) > 1 else "unknown"
-    
+
     try:
-        cur.execute(query, submissionData)
+        cur.execute(SUBMISSION_INSERT_QUERY, submissionData)
         logger.debug(f"\t [DB] Added submission {submission_id} ({subreddit})")
     except Exception as e:
         traceback.print_exc()
@@ -129,11 +141,10 @@ def addMedia(mediaData):
     """
     Adds a media record into Media Table.
     """
-    query = "INSERT INTO media(hash, submission_id, subreddit, frame_number, frame_count, frame_width, frame_height, total_pixels, file_size) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s);"
     submission_id = mediaData[1] if mediaData and len(mediaData) > 1 else "unknown"
 
     try:
-        cur.execute(query, mediaData)
+        execute_values(cur, MEDIA_INSERT_QUERY, [mediaData], page_size=1)
         logger.debug(f"\t [DB] Added media hash for submission {submission_id}")
         return True
     except Exception as e:
@@ -141,6 +152,41 @@ def addMedia(mediaData):
         cur.execute('ROLLBACK')
         logger.warning(f"\t [DB] Failed to add media for submission {submission_id}: {e}")
         return False
+
+def addSubmissionAndMedia(submissionData, mediaRows):
+    """
+    Adds all media rows and the submission in one transaction.
+    """
+    start_time = time.time()
+    mediaRows = [media for media in mediaRows if media is not None]
+    submission_id = submissionData[0] if submissionData else "unknown"
+    previous_autocommit = conn.autocommit
+
+    try:
+        conn.autocommit = False
+
+        if mediaRows:
+            execute_values(cur, MEDIA_INSERT_QUERY, mediaRows, page_size=100)
+
+        if submissionData is not None:
+            cur.execute(SUBMISSION_INSERT_QUERY, submissionData)
+
+        conn.commit()
+        elapsed = time.time() - start_time
+        logger.info(
+            f"\t [DB] Committed submission {submission_id} with {len(mediaRows)} media row(s) in {elapsed:.3f}s"
+        )
+        return len(mediaRows) > 0
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        elapsed = time.time() - start_time
+        logger.warning(
+            f"\t [DB] Failed to commit submission {submission_id} after {elapsed:.3f}s: {e}"
+        )
+        return False
+    finally:
+        conn.autocommit = previous_autocommit
 
 def getAllMedia():
     """
@@ -162,10 +208,10 @@ def getSubmission(submissionid):
     """
     Returns id, subreddit of all records.
     """
-    query = "SELECT id, subreddit, timestamp, author, title FROM submissions WHERE id =\'{0}\';".format(submissionid)
-    
+    query = "SELECT id, subreddit, timestamp, author, title FROM submissions WHERE id = %s;"
+
     try:
-        cur.execute(query)
+        cur.execute(query, (submissionid,))
         submission = cur.fetchone()
         logger.debug(f"\t [DB] Loaded submission {submissionid}: {submission is not None}")
         return submission
@@ -178,10 +224,10 @@ def commentExists(commentid):
     """
     Returns true if the comment exists inside mentions table.
     """
-    query = "SELECT * FROM mentions WHERE commentid = \'{0}\';".format(commentid)
-    
+    query = "SELECT 1 FROM mentions WHERE commentid = %s LIMIT 1;"
+
     try:
-        cur.execute(query)
+        cur.execute(query, (commentid,))
         exists = (cur.fetchone()) is not None
         logger.debug(f"\t [DB] Comment {commentid} exists: {exists}")
         return exists
@@ -194,10 +240,10 @@ def addComment(commentid, submission_id, type, requester, subreddit):
     """
     Add a record in mentions table.
     """
-    query = "INSERT INTO mentions(commentid, submission_id, type, requester, subreddit) VALUES(\'{0}\', \'{1}\', \'{2}\', \'{3}\', \'{4}\');".format(commentid, submission_id, type, requester, subreddit)
+    query = "INSERT INTO mentions(commentid, submission_id, type, requester, subreddit) VALUES(%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING;"
 
     try:
-        cur.execute(query)
+        cur.execute(query, (commentid, submission_id, type, requester, subreddit))
         logger.debug(f"\t [DB] Added comment {commentid} for submission {submission_id}")
     except Exception as e:
         traceback.print_exc()
