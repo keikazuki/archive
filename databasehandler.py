@@ -5,6 +5,10 @@ Handles all connections to the database. The database runs on PostgreSQL and is 
 
 import psycopg2
 import traceback
+import logging
+import time
+
+logger = logging.getLogger("archive")
 
 DBNAME      = ''
 DBUSER      = ''
@@ -35,6 +39,7 @@ try:
     cur = conn.cursor()
 except (Exception) as e:
     print('DB Connection Failed. Error = {0}'.format(e), flush = True)
+    logger.warning('DB Connection Failed. Error = {0}'.format(e))
 
 '''
     Code for create tables
@@ -48,18 +53,19 @@ def submissionExists(submissionid):
     
     try:
         cur.execute(query)
-        if (cur.fetchone()) is None:
-            return False
-        else:
-            return True
-    except Exception:
+        exists = (cur.fetchone()) is not None
+        logger.debug(f"\t [DB] Submission {submissionid} exists: {exists}")
+        return exists
+    except Exception as e:
         traceback.print_exc()
+        logger.warning(f"\t [DB] Failed to check submission {submissionid}: {e}")
         return True
         
 def getArchieveSubredditsList():
     """
     List of subreddits to index in background (reads posts and index images/gifs/videos) Will not comment for these subreddits
     """
+    start_time = time.time()
     query = "SELECT subreddit FROM indexsubreddits;"
     
     try:
@@ -68,15 +74,22 @@ def getArchieveSubredditsList():
         subredditslist = cur.fetchall()
         for item in subredditslist:
             sublist.append(str(item).strip("(),"))
-        return '+'.join(sublist).replace("'", "")
-    except Exception:
+        subreddit_list = '+'.join(sublist).replace("'", "")
+        elapsed = time.time() - start_time
+        logger.info(
+            f"\t [DB] Loaded {len(sublist)} archive subreddit(s) in {elapsed:.3f}s"
+        )
+        return subreddit_list
+    except Exception as e:
         traceback.print_exc()
+        logger.warning(f"\t [DB] Failed to load archive subreddits: {e}")
         return
     
 def getRepostCheckerList():
     """
     List of subreddits to index in background (reads posts and index images/gifs/videos) Will comment for these subreddits
     """
+    start_time = time.time()
     query = "SELECT subreddit FROM checksubreddits;"
     
     try:
@@ -85,9 +98,15 @@ def getRepostCheckerList():
         subredditslist = cur.fetchall()
         for item in subredditslist:
             sublist.append(str(item).strip("(),"))
-        return '+'.join(sublist).replace("'", "")
-    except Exception:
+        subreddit_list = '+'.join(sublist).replace("'", "")
+        elapsed = time.time() - start_time
+        logger.info(
+            f"\t [DB] Loaded {len(sublist)} repostchecker subreddit(s) in {elapsed:.3f}s"
+        )
+        return subreddit_list
+    except Exception as e:
         traceback.print_exc()
+        logger.warning(f"\t [DB] Failed to load repostchecker subreddits: {e}")
         return
 
 def addSubmission(submissionData):
@@ -95,25 +114,32 @@ def addSubmission(submissionData):
     Adds a submission record into Submissions Table.
     """
     query = "INSERT INTO submissions(id, subreddit, timestamp, author, title, url, comments, score, deleted, processed) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);"
+    submission_id = submissionData[0] if submissionData else "unknown"
+    subreddit = submissionData[1] if submissionData and len(submissionData) > 1 else "unknown"
     
     try:
         cur.execute(query, submissionData)
-    except Exception:
+        logger.debug(f"\t [DB] Added submission {submission_id} ({subreddit})")
+    except Exception as e:
         traceback.print_exc()
         cur.execute('ROLLBACK')
+        logger.warning(f"\t [DB] Failed to add submission {submission_id}: {e}")
 
 def addMedia(mediaData):
     """
     Adds a media record into Media Table.
     """
     query = "INSERT INTO media(hash, submission_id, subreddit, frame_number, frame_count, frame_width, frame_height, total_pixels, file_size) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s);"
+    submission_id = mediaData[1] if mediaData and len(mediaData) > 1 else "unknown"
 
     try:
         cur.execute(query, mediaData)
+        logger.debug(f"\t [DB] Added media hash for submission {submission_id}")
         return True
-    except Exception:
+    except Exception as e:
         traceback.print_exc()
         cur.execute('ROLLBACK')
+        logger.warning(f"\t [DB] Failed to add media for submission {submission_id}: {e}")
         return False
 
 def getAllMedia():
@@ -124,9 +150,12 @@ def getAllMedia():
 
     try:
         cur.execute(query)
-        return cur.fetchall()
-    except Exception:
+        rows = cur.fetchall()
+        logger.debug(f"\t [DB] Loaded {len(rows)} media row(s)")
+        return rows
+    except Exception as e:
         traceback.print_exc()
+        logger.warning(f"\t [DB] Failed to load media rows: {e}")
         return
 
 def getSubmission(submissionid):
@@ -137,9 +166,12 @@ def getSubmission(submissionid):
     
     try:
         cur.execute(query)
-        return cur.fetchone()
-    except Exception:
+        submission = cur.fetchone()
+        logger.debug(f"\t [DB] Loaded submission {submissionid}: {submission is not None}")
+        return submission
+    except Exception as e:
         traceback.print_exc()
+        logger.warning(f"\t [DB] Failed to load submission {submissionid}: {e}")
         return
 
 def commentExists(commentid):
@@ -150,12 +182,12 @@ def commentExists(commentid):
     
     try:
         cur.execute(query)
-        if (cur.fetchone()) is None:
-            return False
-        else:
-            return True
-    except Exception:
+        exists = (cur.fetchone()) is not None
+        logger.debug(f"\t [DB] Comment {commentid} exists: {exists}")
+        return exists
+    except Exception as e:
         traceback.print_exc()
+        logger.warning(f"\t [DB] Failed to check comment {commentid}: {e}")
         return True
 
 def addComment(commentid, submission_id, type, requester, subreddit):
@@ -166,6 +198,8 @@ def addComment(commentid, submission_id, type, requester, subreddit):
 
     try:
         cur.execute(query)
-    except Exception:
+        logger.debug(f"\t [DB] Added comment {commentid} for submission {submission_id}")
+    except Exception as e:
         traceback.print_exc()
         cur.execute('ROLLBACK')
+        logger.warning(f"\t [DB] Failed to add comment {commentid}: {e}")

@@ -5,12 +5,12 @@ Acts as the "main" file and ties all the other functionality together.
 import io, os, praw, psycopg2, time, urllib.request, prawcore, logging, json
 import requests, cv2, traceback, re, sys
 import config
-import databasehandler
 from PIL import Image
 from PIL import ImageStat
 from imgurpython import ImgurClient
 from bs4 import BeautifulSoup
 from redgifs import API
+from prawcore.exceptions import TooManyRequests
 
 USERNAME            = config.USERNAME
 PASSWORD            = config.PASSWORD
@@ -20,14 +20,6 @@ REDDITAPPSECRET     = config.REDDITAPPSECRET
 
 IMGUR_CLIENTID      = config.IMGUR_CLIENTID
 IMGUR_CLIENTSECRET  = config.IMGUR_CLIENTSECRET
-
-SUBREDDITLIST       = databasehandler.getArchieveSubredditsList()
-
-reddit = praw.Reddit(client_id=REDDITAPPID,
-                     client_secret=REDDITAPPSECRET,
-                     password=PASSWORD,
-                     user_agent=USERAGENT,
-                     username=USERNAME)
 
 API_URL_REDGIFS = 'https://api.redgifs.com/v2/gifs/'
 
@@ -45,6 +37,17 @@ logger = logging.getLogger("archive")
 
 sys.stdout.reconfigure(encoding='utf-8')
 os.chdir(BASE_DIR)
+
+# Import after logging setup so database connection failures land in archive.log.
+import databasehandler
+
+SUBREDDITLIST       = databasehandler.getArchieveSubredditsList()
+
+reddit = praw.Reddit(client_id=REDDITAPPID,
+                     client_secret=REDDITAPPSECRET,
+                     password=PASSWORD,
+                     user_agent=USERAGENT,
+                     username=USERNAME)
 
 def convertDateFormat(timestamp):
     return str(time.strftime('%B %d, %Y - %H:%M:%S', time.localtime(timestamp)))
@@ -83,6 +86,7 @@ def DifferenceHash(theImage):
 
 def getMediaData(url, submission, image):
     try:
+        start_time = time.time()
         #Delete previous leftover media_file if any
         try:
             os.remove('archive_media_file.png')
@@ -123,6 +127,10 @@ def getMediaData(url, submission, image):
         except:
             pass
         
+        elapsed = time.time() - start_time
+        logger.info(
+            f"\t [Media] Processed image in {elapsed:.2f}s (Size: {size} bytes, Dims: {width}x{height})"
+        )
         return mediaData
     except Exception as e:
         traceback.print_exc()
@@ -154,6 +162,7 @@ def getSubmissionData(mediaprocessed, submission):
         return
 
 def add_DB_Record(submission, mediaData):
+    start_time = time.time()
     mediaprocessed = False
     if mediaData is not None:
         #Ignore Imgur generic deleted media data
@@ -163,12 +172,16 @@ def add_DB_Record(submission, mediaData):
                 mediaprocessed = databasehandler.addMedia(media)
     #Add submission table record
     databasehandler.addSubmission(getSubmissionData(mediaprocessed, submission))
+    elapsed = time.time() - start_time
+    logger.info(f"\t [DB] Records added in {elapsed:.2f}s")
 
 
 
 def getVideoMediaData(video_url, submission):
     """ video_url should end with .mp4 """
-    try:        
+    try:
+        start_time = time.time()
+        logger.info(f"\t [Video] Starting video download from: {video_url[:60]}...")
         hash            = []
         mediaData       = []
         mediaDataTemp   = []
@@ -189,11 +202,16 @@ def getVideoMediaData(video_url, submission):
         
         #Start Video processing 
         #Index 1 second of Video (1FPS)
+        download_time = time.time() - start_time
+        logger.info(
+            f"\t [Video] Downloaded in {download_time:.2f}s, processing frames..."
+        )
         KPS         = 1 #Target KeyFrames Per Second
         cap         = cv2.VideoCapture("archive_media_file.mp4")
         fps         = round(cap.get(cv2.CAP_PROP_FPS))
         hop         = round(fps / KPS)
         curr_frame  = 0
+        frame_count = 0
         
         try:
             while 1:
@@ -207,11 +225,13 @@ def getVideoMediaData(video_url, submission):
                     
                     #Prepare MediaData for frames (1 frame per second)
                     mediaDataTemp.append(getMediaData(None, submission, im))
+                    frame_count += 1
                 curr_frame += 1
         except Exception as e:
             traceback.print_exc()
             return
         cap.release()
+        logger.info(f"\t [Video] Extracted {frame_count} frames")
         
         #Remove duplicate media entries for different key frames
         for media in mediaDataTemp:
@@ -225,6 +245,10 @@ def getVideoMediaData(video_url, submission):
         except:
             pass
         
+        total_time = time.time() - start_time
+        logger.info(
+            f"\t [Video] Completed in {total_time:.2f}s (Unique hashes: {len(mediaData)})"
+        )
         return mediaData
     except Exception as e:
         traceback.print_exc()
@@ -275,11 +299,11 @@ def get_redgifs_embedded_video_url(url):
         links        = str(html.find_all())
         
         #Get the direct video_url
-        video_url    = re.search('meta content="https://thumbs2.redgifs.com/?.*?\.mp4', links).group()[14:]
+        video_url    = re.search('meta content="https://thumbs2.redgifs.com/?.*?\\.mp4', links).group()[14:]
         if video_url is not None:
             return video_url
         else:
-            video_url = re.search('meta content="https://thumbs2.redgifs.com/?.*?\.webm', links).group()[14:]
+            video_url = re.search('meta content="https://thumbs2.redgifs.com/?.*?\\.webm', links).group()[14:]
             if video_url is not None:
                 video_url = str(video_url.replace(".webm",".mp4"))
                 return video_url
@@ -466,6 +490,8 @@ def getImgurAlbumMediaData(images, submission):
 
 def getGifMediaData(url, submission):
     try:
+        start_time = time.time()
+        logger.info(f"\t [GIF] Starting GIF download from: {url[:60]}...")
         hash            = []
         mediaData       = []
         mediaDataTemp   = []
@@ -486,6 +512,7 @@ def getGifMediaData(url, submission):
         
         #Open gif
         im = Image.open("archive_media_file.gif")
+        frame_count = 0
         try:
             #Get image from each frame of gif
             im.seek(im.tell()) 
@@ -493,6 +520,7 @@ def getGifMediaData(url, submission):
                 #Get image from each frame of gif
                 #im.seek(im.tell()+1)
                 mediaDataTemp.append(getMediaData(None, submission, im))
+                frame_count += 1
                 
                 #Remove duplicate media entries for different key frames
                 for media in mediaDataTemp:
@@ -509,6 +537,10 @@ def getGifMediaData(url, submission):
             os.remove('archive_media_file.gif')
         except:
             pass
+        total_time = time.time() - start_time
+        logger.info(
+            f"\t [GIF] Completed in {total_time:.2f}s (Frames: {frame_count}, Unique: {len(mediaData)})"
+        )
         return mediaData
     except Exception as e:
         traceback.print_exc()
@@ -540,7 +572,8 @@ def is_reddit_video(submission):
     try:
         url = submission.url
         if "v.redd.it" in url:
-            logger.info("\t Submission is a reddit video.")
+            start_time = time.time()
+            logger.info("\t [Type] Reddit Video detected")
             
             video_url = url + '/DASH_360.mp4'
             
@@ -549,15 +582,22 @@ def is_reddit_video(submission):
             
             #Add DB records
             add_DB_Record(submission, mediaData)
+            elapsed = time.time() - start_time
+            logger.info(
+                f"\t [Time] is_reddit_video (v.redd.it) completed in {elapsed:.2f}s"
+            )
             return True
         elif url.lower().endswith(".mp4"):
-            logger.info("\t Submission is a direct video.")
+            start_time = time.time()
+            logger.info("\t [Type] Direct MP4 video detected")
             
             #Get mediaData
             mediaData = getVideoMediaData(url, submission)
             
             #Add DB records
             add_DB_Record(submission, mediaData)
+            elapsed = time.time() - start_time
+            logger.info(f"\t [Time] is_reddit_video (.mp4) completed in {elapsed:.2f}s")
             return True
         else:
             return False
@@ -570,21 +610,29 @@ def is_gfycat_link(submission):
     try:
         url = submission.url
         if "gfycat.com/" in url:
-            logger.info("\t Submission is a gfycat link.")
+            start_time = time.time()
+            logger.info("\t [Type] Gfycat link detected")
             
             #Get embedded gfycat video | video_url should end with .mp4
             video_url = get_gfycat_embedded_video_url(url)
             
             if video_url is not None:
+                logger.info("\t [Gfycat] Video URL extracted, processing...")
                 #Get mediaData
                 mediaData = getVideoMediaData(video_url, submission)
                 
                 #Add DB records
                 add_DB_Record(submission, mediaData)
+                elapsed = time.time() - start_time
+                logger.info(f"\t [Time] is_gfycat_link completed in {elapsed:.2f}s")
                 return True
             else:
                 #Add DB records
                 add_DB_Record(submission, None)
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"\t [Time] is_gfycat_link completed without media in {elapsed:.2f}s"
+                )
                 return False
         else:
             return False
@@ -597,18 +645,26 @@ def is_redgifs_link(submission):
     try:
         url = submission.url
         if "redgifs.com/" in url:
-            logger.info("\t Submission is a redgifs link.")
+            start_time = time.time()
+            logger.info("\t [Type] Redgifs link detected")
             
             #Get embedded redgifs video | video_url should end with .mp4
+            logger.info("\t [Redgifs] Extracting video...")
             mediaData = get_redgifs_embedded_video_url(url, submission)
             
             if mediaData is not None:
                 #Add DB records
                 add_DB_Record(submission, mediaData)
+                elapsed = time.time() - start_time
+                logger.info(f"\t [Time] is_redgifs_link completed in {elapsed:.2f}s")
                 return True
             else:
                 #Add DB records
                 add_DB_Record(submission, None)
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"\t [Time] is_redgifs_link completed without media in {elapsed:.2f}s"
+                )
                 return False
         else:
             return False
@@ -621,7 +677,8 @@ def is_imgur_album(submission):
     try:
         url = str(submission.url.replace("m.imgur.com","i.imgur.com"))
         if "imgur.com/a/" in  url:
-            logger.info("\t Submission is an Imgur Album")
+            start_time = time.time()
+            logger.info("\t [Type] Imgur Album detected")
             
             #Get Imgur album ID
             album_id = url.split("imgur.com/a/")[-1]
@@ -633,6 +690,8 @@ def is_imgur_album(submission):
             
             #Add DB records
             add_DB_Record(submission, mediaData)
+            elapsed = time.time() - start_time
+            logger.info(f"\t [Time] is_imgur_album completed in {elapsed:.2f}s")
             return True
         else:
             return False
@@ -645,16 +704,20 @@ def is_direct_link_to_gif(submission):
     try:
         url = submission.url
         if url.lower().endswith(".gif"):
-            logger.info("\t Submission is a GIF.")                                      
+            start_time = time.time()
+            logger.info("\t [Type] GIF file detected")
             
             #Get mediaData
             mediaData = getGifMediaData(url, submission)
             
             #Add DB records
             add_DB_Record(submission, mediaData)
+            elapsed = time.time() - start_time
+            logger.info(f"\t [Time] is_direct_link_to_gif (.gif) completed in {elapsed:.2f}s")
             return True
         elif url.lower().endswith(".gifv"):
-            logger.info("\t Submission is a GIFV.")
+            start_time = time.time()
+            logger.info("\t [Type] GIFV file detected")
             url = str(url.replace(".gifv",".mp4"))
             
             #Get mediaData
@@ -662,6 +725,8 @@ def is_direct_link_to_gif(submission):
             
             #Add DB records
             add_DB_Record(submission, mediaData)
+            elapsed = time.time() - start_time
+            logger.info(f"\t [Time] is_direct_link_to_gif (.gifv) completed in {elapsed:.2f}s")
             return True
         else:
             return False
@@ -673,13 +738,16 @@ def is_direct_link_to_gif(submission):
 def is_reddit_gallery(submission):
     try:
         if "reddit.com/gallery" in submission.url:
-            logger.info("\t Submission is a gallery.")
+            start_time = time.time()
+            logger.info("\t [Type] Reddit Gallery detected")
             
             #Get mediaData
             mediaData = getRedditGalleryMediaData(submission)
             
             #Add DB records
             add_DB_Record(submission, mediaData)
+            elapsed = time.time() - start_time
+            logger.info(f"\t [Time] is_reddit_gallery completed in {elapsed:.2f}s")
             return True
         else:
             return False
@@ -709,12 +777,18 @@ def is_direct_link_to_content(submission):
             "500px.org" in url              or 
             "redditmedia.com" in url        or
             "preview.redd.it" in url):
+            start_time = time.time()
+            logger.info("\t [Type] Direct image link detected")
             
             #Get mediaData
             mediaData.append(getMediaData(url, submission, None))
             
             #Add DB records
             add_DB_Record(submission, mediaData)
+            elapsed = time.time() - start_time
+            logger.info(
+                f"\t [Time] is_direct_link_to_content completed in {elapsed:.2f}s"
+            )
             return True
         else:
             return False
@@ -725,35 +799,45 @@ def is_direct_link_to_content(submission):
 
 def indexSubmission(submission):
     try:
+        submission_start = time.time()
         #Skip text only posts
         if submission.is_self:
             s = re.findall(r'(https?://[^\s]+)', submission.selftext)
             if s:
                 submission.url = s[0]
             else:
+                logger.info("\t [Index] Text post without URL, skipping")
                 return
         
         #Skip if already indexed
         if databasehandler.submissionExists(submission.id):
+            logger.info(f"\t [Index] Submission already exists, skipping")
             return
         
-        logger.info(f"\t Processing: https://reddit.com{submission.permalink}")
+        logger.info(f"\t [Index] Start: https://reddit.com{submission.permalink}")
         
         #Start Indexing Image
+        processed = False
         if is_direct_link_to_content(submission):
-            pass
+            processed = True
         elif is_reddit_gallery(submission):
-            pass
+            processed = True
         elif is_direct_link_to_gif(submission):
-            pass
+            processed = True
         elif is_imgur_album(submission):
-            pass
+            processed = True
         elif is_redgifs_link(submission):
-            pass
+            processed = True
         elif is_gfycat_link(submission):
-            pass
+            processed = True
         elif is_reddit_video(submission):
-            pass
+            processed = True
+
+        if not processed:
+            logger.info("\t [Index] No supported media found")
+
+        total_elapsed = time.time() - submission_start
+        logger.info(f"\t [Index] Complete in {total_elapsed:.2f}s")
     except Exception as e:
         traceback.print_exc()
         logger.warning("\t  Error in indexSubmission \t Error= {0}".format(e))
@@ -765,6 +849,7 @@ def start():
     # major error (usually this means the Reddit access token needs refreshing)
 
     subreddits = reddit.subreddit(SUBREDDITLIST)
+    logger.info(f"\t [Stream] Starting submission stream...")
     
     #for submission in subreddits.new(limit=None):
        #if submission:
@@ -780,9 +865,28 @@ if __name__ == '__main__':
     
     # Loop the submission stream until the Reddit access token expires.
     # Then get a new access token and start the stream again.
+    logger.info("=" * 70)
+    logger.info("ARCHIVE STARTED")
+    logger.info("=" * 70)
+    logger.info(f"\t [Start] Monitoring subreddits: {str(SUBREDDITLIST)[:100]}...")
+    logger.info(f"\t [Start] Connected to Reddit as u/{reddit.user.me()}")
+
     while 1:
         try:
             start()
+        except TooManyRequests as e:
+            headers = e.response.headers if e.response is not None else {}
+            retry_after = None
+
+            if "retry-after" in headers:
+                retry_after = float(headers["retry-after"])
+            elif "x-ratelimit-reset" in headers:
+                retry_after = float(headers["x-ratelimit-reset"]) + 1
+            else:
+                retry_after = 60
+
+            logger.warning(f"\t [RateLimit] Sleeping for {retry_after} seconds")
+            time.sleep(retry_after)
         except Exception as e:
             logger.warning("\t  Error in __main__ \t Error= {0}".format(e))
             pass
