@@ -28,6 +28,9 @@ MEDIA_REQUEST_TIMEOUT = 45
 VIDEO_REQUEST_TIMEOUT = 180
 REDGIFS_VIDEO_URL_FIELDS = ("sd", "hd")
 IGNORED_MEDIA_HASH = "9925021303884596990"
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".jpg_large", ".svg")
+GIF_EXTENSION = ".gif"
+GIFV_EXTENSION = ".gifv"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 log_path = os.path.join(BASE_DIR, "archive.log")
@@ -59,12 +62,22 @@ reddit = praw.Reddit(
 )
 
 
+class SubmissionUrlOverride:
+    def __init__(self, submission, url):
+        self._submission = submission
+        self.url = url
+
+    def __getattr__(self, name):
+        return getattr(self._submission, name)
+
+
 def convertDateFormat(timestamp):
     return str(time.strftime("%B %d, %Y - %H:%M:%S", time.localtime(timestamp)))
 
 
 def get_redirect_url(url):
     r = requests.get(url, timeout=(10, 30))
+    r.raise_for_status()
     return r.url
 
 
@@ -212,17 +225,15 @@ def getMediaData(url, submission, image):
 
 def getSubmissionData(mediaprocessed, submission):
     try:
-        if submission.author == "[deleted]":
-            submissionDeleted = True
-        else:
-            submissionDeleted = False
+        submissionDeleted = submission.author is None
+        author = "[deleted]" if submissionDeleted else str(submission.author)
 
         # Prepare Submission Object
         submissionData = (
             str(submission.id),
             submission.subreddit.display_name,
             float(submission.created),
-            str(submission.author),
+            author,
             str(submission.title),
             str(submission.url),
             int(submission.num_comments),
@@ -302,6 +313,7 @@ def get_gfycat_embedded_video_url(url):
         thumbs_url = ""
 
         response = requests.get(url, timeout=(10, 30))
+        response.raise_for_status()
         data = response.text
         soup = BeautifulSoup(data, features="html.parser")
 
@@ -751,7 +763,8 @@ def is_imgur_album(submission):
 def is_direct_link_to_gif(submission):
     try:
         url = submission.url
-        if url.lower().endswith(".gif"):
+        path = urllib.parse.urlparse(url).path.lower()
+        if path.endswith(GIF_EXTENSION):
             start_time = time.time()
             logger.info("\t [Type] GIF file detected")
 
@@ -765,10 +778,10 @@ def is_direct_link_to_gif(submission):
                 f"\t [Time] is_direct_link_to_gif (.gif) completed in {elapsed:.2f}s"
             )
             return True
-        elif url.lower().endswith(".gifv"):
+        elif path.endswith(GIFV_EXTENSION):
             start_time = time.time()
             logger.info("\t [Type] GIFV file detected")
-            url = str(url.replace(".gifv", ".mp4"))
+            url = re.sub(r"\.gifv(?=($|[?#]))", ".mp4", url, flags=re.IGNORECASE)
 
             # Get mediaData
             mediaData = getVideoMediaData(url, submission)
@@ -814,19 +827,9 @@ def is_direct_link_to_content(submission):
     try:
         mediaData = []
         url = str(submission.url.replace("m.imgur.com", "i.imgur.com"))
+        path = urllib.parse.urlparse(url).path.lower()
         if (
-            url.lower().endswith(".jpg")
-            or url.lower().endswith(".jpg?1")
-            or url.lower().endswith(".png")
-            or url.lower().endswith(".png?1")
-            or url.lower().endswith(".jpeg")
-            or url.lower().endswith(".jpeg?1")
-            or url.lower().endswith(".webp")
-            or url.lower().endswith(".webp?1")
-            or url.lower().endswith(".jpg_large")
-            or url.lower().endswith(".jpg_large?1")
-            or url.lower().endswith(".svg")
-            or url.lower().endswith(".svg?1")
+            path.endswith(IMAGE_EXTENSIONS)
             or "reddituploads.com" in url
             or "reutersmedia.net" in url
             or "500px.org" in url
@@ -857,11 +860,13 @@ def is_direct_link_to_content(submission):
 def indexSubmission(submission):
     try:
         submission_start = time.time()
+        submission_to_index = submission
         # Skip text only posts
         if submission.is_self:
             s = re.findall(r"(https?://[^\s]+)", submission.selftext)
             if s:
-                submission.url = s[0]
+                url = s[0].rstrip(".,;:!?)>]}'\"")
+                submission_to_index = SubmissionUrlOverride(submission, url)
             else:
                 logger.info("\t [Index] Text post without URL, skipping")
                 return
@@ -875,19 +880,19 @@ def indexSubmission(submission):
 
         # Start Indexing Image
         processed = False
-        if is_direct_link_to_content(submission):
+        if is_direct_link_to_content(submission_to_index):
             processed = True
-        elif is_reddit_gallery(submission):
+        elif is_reddit_gallery(submission_to_index):
             processed = True
-        elif is_direct_link_to_gif(submission):
+        elif is_direct_link_to_gif(submission_to_index):
             processed = True
-        elif is_imgur_album(submission):
+        elif is_imgur_album(submission_to_index):
             processed = True
-        elif is_redgifs_link(submission):
+        elif is_redgifs_link(submission_to_index):
             processed = True
-        elif is_gfycat_link(submission):
+        elif is_gfycat_link(submission_to_index):
             processed = True
-        elif is_reddit_video(submission):
+        elif is_reddit_video(submission_to_index):
             processed = True
 
         if not processed:
@@ -895,6 +900,11 @@ def indexSubmission(submission):
 
         total_elapsed = time.time() - submission_start
         logger.info(f"\t [Index] Complete in {total_elapsed:.2f}s")
+    except databasehandler.ArchiveDatabaseError as e:
+        logger.warning(
+            "\t  Database unavailable in indexSubmission \t Error= {0}".format(e)
+        )
+        raise
     except Exception as e:
         traceback.print_exc()
         logger.warning("\t  Error in indexSubmission \t Error= {0}".format(e))
@@ -902,9 +912,15 @@ def indexSubmission(submission):
 
 def start():
     """The main function"""
+    global SUBREDDITLIST
 
     # This opens a constant stream of submissions. It will loop until there's a
     # major error (usually this means the Reddit access token needs refreshing)
+
+    if not SUBREDDITLIST:
+        SUBREDDITLIST = databasehandler.getArchieveSubredditsList()
+    if not SUBREDDITLIST:
+        raise databasehandler.ArchiveDatabaseError("No archive subreddits loaded")
 
     subreddits = reddit.subreddit(SUBREDDITLIST)
     logger.info(f"\t [Stream] Starting submission stream...")
@@ -913,9 +929,11 @@ def start():
     # if submission:
     # indexSubmission(submission)
 
-    for submission in subreddits.stream.submissions(pause_after=0):
-        if submission:
-            indexSubmission(submission)
+    for submission in subreddits.stream.submissions(pause_after=5):
+        if submission is None:
+            time.sleep(5)
+            continue
+        indexSubmission(submission)
 
 
 if __name__ == "__main__":
@@ -948,4 +966,4 @@ if __name__ == "__main__":
             time.sleep(retry_after)
         except Exception as e:
             logger.warning("\t  Error in __main__ \t Error= {0}".format(e))
-            pass
+            time.sleep(60)
