@@ -835,7 +835,9 @@ def is_reddit_video(submission):
             # Add DB records
             add_DB_Record(submission, mediaData)
             elapsed = time.time() - start_time
-            logger.info(f"\t [Time] is_reddit_video (direct) completed in {elapsed:.2f}s")
+            logger.info(
+                f"\t [Time] is_reddit_video (direct) completed in {elapsed:.2f}s"
+            )
             return True
         else:
             return False
@@ -1218,7 +1220,7 @@ def start():
     # if submission:
     # indexSubmission(submission)
 
-    for submission in subreddits.stream.submissions(pause_after=5):
+    for submission in subreddits.stream.submissions(pause_after=0):
         if submission is None:
             time.sleep(5)
             continue
