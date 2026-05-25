@@ -5,6 +5,7 @@ Acts as the "main" file and ties all the other functionality together.
 import io, os, praw, psycopg2, time, urllib.request, urllib.parse, prawcore, logging, json
 import requests, cv2, traceback, re, sys
 import config
+from html import unescape
 from PIL import Image
 from PIL import ImageSequence
 from PIL import ImageStat
@@ -28,9 +29,37 @@ MEDIA_REQUEST_TIMEOUT = 45
 VIDEO_REQUEST_TIMEOUT = 180
 REDGIFS_VIDEO_URL_FIELDS = ("sd", "hd")
 IGNORED_MEDIA_HASH = "9925021303884596990"
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".jpg_large", ".svg")
+IMAGE_EXTENSIONS = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".jpg_large",
+    ".svg",
+    ".avif",
+    ".bmp",
+    ".tif",
+    ".tiff",
+)
 GIF_EXTENSION = ".gif"
 GIFV_EXTENSION = ".gifv"
+VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".m4v")
+TRAILING_URL_CHARS = ".,;:!?)>]}'\""
+GENERIC_PAGE_REQUEST_TIMEOUT = (10, 30)
+MAX_SELFPOST_URLS = 10
+GENERIC_VIDEO_META_KEYS = (
+    "og:video:secure_url",
+    "og:video:url",
+    "og:video",
+    "twitter:player:stream",
+)
+GENERIC_IMAGE_META_KEYS = (
+    "og:image:secure_url",
+    "og:image:url",
+    "og:image",
+    "twitter:image",
+    "twitter:image:src",
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 log_path = os.path.join(BASE_DIR, "archive.log")
@@ -63,11 +92,14 @@ reddit = praw.Reddit(
 
 
 class SubmissionUrlOverride:
-    def __init__(self, submission, url):
+    def __init__(self, submission, url, attrs=None):
         self._submission = submission
         self.url = url
+        self._attrs = attrs or {}
 
     def __getattr__(self, name):
+        if name in self._attrs:
+            return self._attrs[name]
         return getattr(self._submission, name)
 
 
@@ -79,6 +111,38 @@ def get_redirect_url(url):
     r = requests.get(url, timeout=(10, 30))
     r.raise_for_status()
     return r.url
+
+
+def clean_media_url(url):
+    if not url:
+        return ""
+    return unescape(str(url)).replace("&amp;", "&").strip().rstrip(TRAILING_URL_CHARS)
+
+
+def url_path(url):
+    return urllib.parse.urlparse(clean_media_url(url)).path.lower()
+
+
+def is_image_url(url):
+    return url_path(url).endswith(IMAGE_EXTENSIONS)
+
+
+def is_gif_url(url):
+    return url_path(url).endswith(GIF_EXTENSION)
+
+
+def is_video_url(url):
+    return url_path(url).endswith(VIDEO_EXTENSIONS)
+
+
+def add_unique_url(urls, url, base_url=None):
+    url = clean_media_url(url)
+    if not url:
+        return
+    if base_url:
+        url = urllib.parse.urljoin(base_url, url)
+    if url not in urls:
+        urls.append(url)
 
 
 def get_reddit_video_url(submission):
@@ -221,6 +285,23 @@ def getMediaData(url, submission, image):
         traceback.print_exc()
         logger.warning("\t Error in getMediaData \t Error= {0}".format(e))
         return
+
+
+def getMediaDataFromURL(url, submission, media_type=None):
+    url = clean_media_url(url)
+    if not url:
+        return []
+
+    if media_type == "video" or is_video_url(url):
+        mediaData = getVideoMediaData(url, submission)
+        return mediaData or []
+
+    if media_type == "gif" or is_gif_url(url):
+        mediaData = getGifMediaData(url, submission)
+        return mediaData or []
+
+    media = getMediaData(url, submission, None)
+    return [media] if media is not None else []
 
 
 def getSubmissionData(mediaprocessed, submission):
@@ -596,6 +677,7 @@ def getGifMediaData(url, submission):
 def getRedditGalleryMediaData(submission):
     try:
         mediaData = []
+        seen_urls = []
         gallery_data = getattr(submission, "gallery_data", None)
         media_metadata = getattr(submission, "media_metadata", None)
 
@@ -609,19 +691,119 @@ def getRedditGalleryMediaData(submission):
             if meta is None:
                 continue
             if meta.get("status") == "valid":
-                if meta.get("e") == "Image":
-                    source = meta.get("s", {})
-                    url = str(source.get("u", "")).replace("&amp;", "&")
-                    if url == "":
-                        continue
+                source = meta.get("s", {})
+                media_urls = []
+                for source_key, media_type in (
+                    ("mp4", "video"),
+                    ("gif", "gif"),
+                    ("u", "image"),
+                ):
+                    url = clean_media_url(source.get(source_key))
+                    if url:
+                        media_urls.append((url, media_type))
 
-                    # Get mediaData for all gallery images
-                    mediaData.append(getMediaData(url, submission, None))
+                if not media_urls:
+                    previews = meta.get("p", [])
+                    if previews:
+                        url = clean_media_url(previews[-1].get("u"))
+                        if url:
+                            media_urls.append((url, "image"))
+
+                for url, media_type in media_urls:
+                    if url in seen_urls:
+                        continue
+                    seen_urls.append(url)
+                    mediaData.extend(getMediaDataFromURL(url, submission, media_type))
         return mediaData
     except Exception as e:
         traceback.print_exc()
         logger.warning("\t  Error in getRedditGalleryMediaData \t Error= {0}".format(e))
         return
+
+
+def getRedditPreviewMediaData(submission):
+    try:
+        mediaData = []
+        seen_urls = []
+        preview = getattr(submission, "preview", None)
+
+        if not isinstance(preview, dict):
+            return mediaData
+
+        reddit_video_preview = preview.get("reddit_video_preview") or {}
+        add_unique_url(seen_urls, reddit_video_preview.get("fallback_url"))
+        if seen_urls:
+            mediaData.extend(getMediaDataFromURL(seen_urls[-1], submission, "video"))
+
+        for image in preview.get("images", []):
+            variants = image.get("variants", {})
+            candidates = []
+
+            for variant_name, media_type in (
+                ("mp4", "video"),
+                ("gif", "gif"),
+            ):
+                source = variants.get(variant_name, {}).get("source", {})
+                url = clean_media_url(source.get("url"))
+                if url:
+                    candidates.append((url, media_type))
+
+            source = image.get("source", {})
+            url = clean_media_url(source.get("url"))
+            if url:
+                candidates.append((url, "image"))
+
+            for url, media_type in candidates:
+                if url in seen_urls:
+                    continue
+                seen_urls.append(url)
+                mediaData.extend(getMediaDataFromURL(url, submission, media_type))
+
+        return mediaData
+    except Exception as e:
+        traceback.print_exc()
+        logger.warning("\t  Error in getRedditPreviewMediaData \t Error= {0}".format(e))
+        return
+
+
+def get_generic_page_media_url(url):
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": MEDIA_USER_AGENT},
+            timeout=GENERIC_PAGE_REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type", "").split(";")[0].lower()
+
+        if content_type.startswith("image/"):
+            return response.url, "image"
+        if content_type.startswith("video/"):
+            return response.url, "video"
+        if "html" not in content_type:
+            return None, None
+
+        soup = BeautifulSoup(response.text, features="html.parser")
+        for keys, media_type in (
+            (GENERIC_VIDEO_META_KEYS, "video"),
+            (GENERIC_IMAGE_META_KEYS, "image"),
+        ):
+            for key in keys:
+                tag = soup.find("meta", attrs={"property": key}) or soup.find(
+                    "meta", attrs={"name": key}
+                )
+                if tag and tag.get("content"):
+                    media_url = clean_media_url(
+                        urllib.parse.urljoin(response.url, tag.get("content"))
+                    )
+                    if media_type == "video" and not is_video_url(media_url):
+                        continue
+                    return media_url, media_type
+
+        return None, None
+    except Exception as e:
+        logger.debug(f"\t [Generic] Failed to inspect page media for {url}: {e}")
+        return None, None
 
 
 def is_reddit_video(submission):
@@ -643,9 +825,9 @@ def is_reddit_video(submission):
                 f"\t [Time] is_reddit_video (v.redd.it) completed in {elapsed:.2f}s"
             )
             return True
-        elif url.lower().endswith(".mp4"):
+        elif is_video_url(url):
             start_time = time.time()
-            logger.info("\t [Type] Direct MP4 video detected")
+            logger.info("\t [Type] Direct video link detected")
 
             # Get mediaData
             mediaData = getVideoMediaData(url, submission)
@@ -653,7 +835,7 @@ def is_reddit_video(submission):
             # Add DB records
             add_DB_Record(submission, mediaData)
             elapsed = time.time() - start_time
-            logger.info(f"\t [Time] is_reddit_video (.mp4) completed in {elapsed:.2f}s")
+            logger.info(f"\t [Time] is_reddit_video (direct) completed in {elapsed:.2f}s")
             return True
         else:
             return False
@@ -809,6 +991,9 @@ def is_reddit_gallery(submission):
 
             # Get mediaData
             mediaData = getRedditGalleryMediaData(submission)
+            if not mediaData:
+                logger.info("\t [Gallery] No usable media found")
+                return False
 
             # Add DB records
             add_DB_Record(submission, mediaData)
@@ -857,19 +1042,132 @@ def is_direct_link_to_content(submission):
         return False
 
 
+def is_reddit_preview(submission):
+    try:
+        preview = getattr(submission, "preview", None)
+        if not preview:
+            return False
+
+        start_time = time.time()
+        logger.info("\t [Type] Reddit preview media detected")
+
+        mediaData = getRedditPreviewMediaData(submission)
+        if not mediaData:
+            return False
+
+        add_DB_Record(submission, mediaData)
+        elapsed = time.time() - start_time
+        logger.info(f"\t [Time] is_reddit_preview completed in {elapsed:.2f}s")
+        return True
+    except Exception as e:
+        traceback.print_exc()
+        logger.warning("\t  Error in is_reddit_preview \t Error= {0}".format(e))
+        return False
+
+
+def is_generic_page_media(submission):
+    try:
+        url = clean_media_url(submission.url)
+        if not url.startswith(("http://", "https://")):
+            return False
+
+        media_url, media_type = get_generic_page_media_url(url)
+        if not media_url:
+            return False
+
+        start_time = time.time()
+        logger.info(f"\t [Type] Generic page media detected: {media_type}")
+
+        mediaData = getMediaDataFromURL(media_url, submission, media_type)
+        if not mediaData:
+            return False
+
+        add_DB_Record(submission, mediaData)
+        elapsed = time.time() - start_time
+        logger.info(f"\t [Time] is_generic_page_media completed in {elapsed:.2f}s")
+        return True
+    except Exception as e:
+        traceback.print_exc()
+        logger.warning("\t  Error in is_generic_page_media \t Error= {0}".format(e))
+        return False
+
+
+def processSubmissionMedia(submission):
+    if is_direct_link_to_content(submission):
+        return True
+    elif is_reddit_gallery(submission):
+        return True
+    elif is_direct_link_to_gif(submission):
+        return True
+    elif is_imgur_album(submission):
+        return True
+    elif is_redgifs_link(submission):
+        return True
+    elif is_gfycat_link(submission):
+        return True
+    elif is_reddit_video(submission):
+        return True
+    elif is_reddit_preview(submission):
+        return True
+    elif is_generic_page_media(submission):
+        return True
+    return False
+
+
+def getSubmissionMediaCandidates(submission):
+    candidates = []
+    seen_urls = []
+
+    def add_candidate(url, attrs=None):
+        url = clean_media_url(url)
+        if not url or url in seen_urls:
+            return
+        seen_urls.append(url)
+        candidates.append(SubmissionUrlOverride(submission, url, attrs))
+
+    if submission.is_self:
+        for url in re.findall(r"(https?://[^\s]+)", submission.selftext or ""):
+            add_candidate(url)
+            if len(candidates) >= MAX_SELFPOST_URLS:
+                break
+    else:
+        add_candidate(getattr(submission, "url_overridden_by_dest", None))
+        add_candidate(getattr(submission, "url", None))
+
+    for parent in getattr(submission, "crosspost_parent_list", []) or []:
+        if not isinstance(parent, dict):
+            continue
+
+        parent_attrs = {
+            key: parent.get(key)
+            for key in (
+                "gallery_data",
+                "media",
+                "media_metadata",
+                "preview",
+                "secure_media",
+            )
+            if key in parent
+        }
+        add_candidate(
+            parent.get("url_overridden_by_dest") or parent.get("url"),
+            parent_attrs,
+        )
+
+    if not candidates and (
+        getattr(submission, "preview", None)
+        or getattr(submission, "gallery_data", None)
+        or getattr(submission, "media", None)
+        or getattr(submission, "secure_media", None)
+    ):
+        candidates.append(submission)
+
+    return candidates
+
+
 def indexSubmission(submission):
     try:
         submission_start = time.time()
-        submission_to_index = submission
-        # Skip text only posts
-        if submission.is_self:
-            s = re.findall(r"(https?://[^\s]+)", submission.selftext)
-            if s:
-                url = s[0].rstrip(".,;:!?)>]}'\"")
-                submission_to_index = SubmissionUrlOverride(submission, url)
-            else:
-                logger.info("\t [Index] Text post without URL, skipping")
-                return
 
         # Skip if already indexed
         if databasehandler.submissionExists(submission.id):
@@ -878,22 +1176,13 @@ def indexSubmission(submission):
 
         logger.info(f"\t [Index] Start: https://reddit.com{submission.permalink}")
 
-        # Start Indexing Image
         processed = False
-        if is_direct_link_to_content(submission_to_index):
-            processed = True
-        elif is_reddit_gallery(submission_to_index):
-            processed = True
-        elif is_direct_link_to_gif(submission_to_index):
-            processed = True
-        elif is_imgur_album(submission_to_index):
-            processed = True
-        elif is_redgifs_link(submission_to_index):
-            processed = True
-        elif is_gfycat_link(submission_to_index):
-            processed = True
-        elif is_reddit_video(submission_to_index):
-            processed = True
+        process_all_candidates = submission.is_self
+        for submission_to_index in getSubmissionMediaCandidates(submission):
+            candidate_processed = processSubmissionMedia(submission_to_index)
+            processed = processed or candidate_processed
+            if candidate_processed and not process_all_candidates:
+                break
 
         if not processed:
             logger.info("\t [Index] No supported media found")

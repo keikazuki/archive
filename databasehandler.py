@@ -20,7 +20,8 @@ ON CONFLICT DO NOTHING;
 SUBMISSION_INSERT_QUERY = """
 INSERT INTO submissions(id, subreddit, timestamp, author, title, url, comments, score, deleted, processed)
 VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+processed = COALESCE(submissions.processed, FALSE) OR COALESCE(EXCLUDED.processed, FALSE);
 """
 
 DBNAME = ""
