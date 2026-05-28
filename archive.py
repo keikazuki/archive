@@ -12,6 +12,7 @@ from PIL import ImageStat
 from imgurpython import ImgurClient
 from bs4 import BeautifulSoup
 from redgifs import API
+from redgifs.errors import RedGifsError
 from prawcore.exceptions import TooManyRequests
 
 USERNAME = config.USERNAME
@@ -608,9 +609,17 @@ def get_redgifs_embedded_video_url(redgifs_url, submission):
                 f"\t [Redgifs] Completed in {elapsed:.2f}s (Unique hashes: {len(mediaData)})"
             )
             return mediaData
+        except RedGifsError as e:
+            logger.warning(f"\t [Redgifs] Failed processing ID {redgifs_ID}: {e}")
+            return
         except Exception as e:
             logger.warning(f"\t [Redgifs] Failed processing ID {redgifs_ID}: {e}")
             return
+    except RedGifsError as e:
+        logger.warning(
+            "\t  Error in get_redgifs_embedded_video_url \t Error= {0}".format(e)
+        )
+        return
     except Exception as e:
         traceback.print_exc()
         logger.warning(
@@ -910,6 +919,9 @@ def is_redgifs_link(submission):
                 return False
         else:
             return False
+    except RedGifsError as e:
+        logger.warning("\t  Error in is_redgifs_link \t Error= {0}".format(e))
+        return False
     except Exception as e:
         traceback.print_exc()
         logger.warning("\t  Error in is_redgifs_link \t Error= {0}".format(e))
@@ -1255,6 +1267,9 @@ if __name__ == "__main__":
 
             logger.warning(f"\t [RateLimit] Sleeping for {retry_after} seconds")
             time.sleep(retry_after)
+        except RedGifsError as e:
+            logger.warning("\t  Error in __main__ \t Error= {0}".format(e))
+            time.sleep(60)
         except Exception as e:
             logger.warning("\t  Error in __main__ \t Error= {0}".format(e))
             time.sleep(60)
