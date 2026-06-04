@@ -146,21 +146,57 @@ def add_unique_url(urls, url, base_url=None):
         urls.append(url)
 
 
-def get_reddit_video_url(submission):
+def clean_redgifs_id(redgifs_id):
+    if not redgifs_id:
+        return
+    redgifs_id = re.sub(r"\W+", "", str(redgifs_id))
+    redgifs_id = re.sub(r"https?$", "", redgifs_id, flags=re.IGNORECASE)
+    return redgifs_id or None
+
+
+def get_reddit_video_urls(submission):
+    urls = []
+
     media = getattr(submission, "media", None)
     if isinstance(media, dict):
         nested_media = media.get("secure_media") or {}
         reddit_video = media.get("reddit_video") or nested_media.get("reddit_video")
-        if reddit_video and reddit_video.get("fallback_url"):
-            return reddit_video["fallback_url"].replace("&amp;", "&")
+        if reddit_video:
+            add_unique_url(urls, reddit_video.get("fallback_url"))
 
     secure_media = getattr(submission, "secure_media", None)
     if isinstance(secure_media, dict):
         reddit_video = secure_media.get("reddit_video")
-        if reddit_video and reddit_video.get("fallback_url"):
-            return reddit_video["fallback_url"].replace("&amp;", "&")
+        if reddit_video:
+            add_unique_url(urls, reddit_video.get("fallback_url"))
 
-    return submission.url + "/DASH_360.mp4"
+    preview = getattr(submission, "preview", None)
+    if isinstance(preview, dict):
+        reddit_video_preview = preview.get("reddit_video_preview") or {}
+        add_unique_url(urls, reddit_video_preview.get("fallback_url"))
+
+    url = clean_media_url(getattr(submission, "url", None))
+    if "v.redd.it" in url:
+        if is_video_url(url):
+            add_unique_url(urls, url)
+        else:
+            base_url = url.split("?", 1)[0].rstrip("/")
+            for video_name in (
+                "DASH_1080.mp4",
+                "DASH_720.mp4",
+                "DASH_480.mp4",
+                "DASH_360.mp4",
+            ):
+                add_unique_url(urls, f"{base_url}/{video_name}")
+
+    return urls
+
+
+def get_reddit_video_url(submission):
+    urls = get_reddit_video_urls(submission)
+    if urls:
+        return urls[0]
+    return clean_media_url(submission.url) + "/DASH_360.mp4"
 
 
 def DifferenceHash(theImage):
@@ -433,10 +469,10 @@ def get_redgifs_id(redgifs_url):
         if prefix in path_parts:
             index = path_parts.index(prefix)
             if len(path_parts) > index + 1:
-                return re.sub(r"\W+", "", path_parts[index + 1])
+                return clean_redgifs_id(path_parts[index + 1])
 
     if path_parts:
-        return re.sub(r"\W+", "", path_parts[-1])
+        return clean_redgifs_id(path_parts[-1])
 
     return
 
@@ -775,7 +811,7 @@ def getRedditPreviewMediaData(submission):
         return
 
 
-def get_generic_page_media_url(url):
+def get_generic_page_media_url(url, include_html_meta=False):
     try:
         response = requests.get(
             url,
@@ -789,7 +825,7 @@ def get_generic_page_media_url(url):
             return response.url, "image"
         if content_type.startswith("video/"):
             return response.url, "video"
-        if "html" not in content_type:
+        if not include_html_meta or "html" not in content_type:
             return None, None
 
         soup = BeautifulSoup(response.text, features="html.parser")
@@ -822,10 +858,19 @@ def is_reddit_video(submission):
             start_time = time.time()
             logger.info("\t [Type] Reddit Video detected")
 
-            video_url = get_reddit_video_url(submission)
-
             # Get mediaData
-            mediaData = getVideoMediaData(video_url, submission)
+            mediaData = None
+            for video_url in get_reddit_video_urls(submission):
+                mediaData = getVideoMediaData(video_url, submission)
+                if mediaData:
+                    break
+                logger.info(
+                    f"\t [Video] No media extracted from {video_url[:60]}, trying next candidate"
+                )
+
+            if not mediaData:
+                logger.info("\t [Video] No usable Reddit video media found")
+                return False
 
             # Add DB records
             add_DB_Record(submission, mediaData)
@@ -840,6 +885,9 @@ def is_reddit_video(submission):
 
             # Get mediaData
             mediaData = getVideoMediaData(url, submission)
+            if not mediaData:
+                logger.info("\t [Video] No usable direct video media found")
+                return False
 
             # Add DB records
             add_DB_Record(submission, mediaData)
