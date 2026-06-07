@@ -320,6 +320,8 @@ Ignored media behavior:
 
 `archive.py` drops low-information images before DB insert. This prevents whole-black, whole-white, and near-uniform transition frames from polluting repost matching. `databasehandler.getAllMedia` also excludes both ignored hashes for compatibility with older code paths.
 
+Expected external video download failures such as HTTP 403, URL errors, and timeouts are logged as concise warnings without stack traces. Unexpected video-processing exceptions still print a traceback so real code bugs remain visible.
+
 Do not change table columns, hash types, primary keys, ignored hashes, or low-information thresholds without updating all shared repos and the production recovery documentation. If a future AI sees live production schema drift, it should update this README and the setup note after confirming the real schema.
 
 ## Local Development

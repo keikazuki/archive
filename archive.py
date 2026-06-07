@@ -2,7 +2,7 @@
 Acts as the "main" file and ties all the other functionality together.
 """
 
-import io, os, praw, psycopg2, time, urllib.request, urllib.parse, prawcore, logging, json
+import io, os, praw, psycopg2, time, urllib.request, urllib.parse, urllib.error, prawcore, logging, json
 import requests, cv2, traceback, re, sys
 import config
 from html import unescape
@@ -448,6 +448,20 @@ def getVideoMediaData(video_url, submission):
             f"\t [Video] Completed in {total_time:.2f}s (Unique hashes: {len(mediaData)})"
         )
         return mediaData
+    except urllib.error.HTTPError as e:
+        logger.warning(
+            "\t [Video] Download failed with HTTP {0} in getVideoMediaData for {1}".format(
+                e.code, video_url[:120]
+            )
+        )
+        return
+    except (urllib.error.URLError, TimeoutError) as e:
+        logger.warning(
+            "\t [Video] Download failed in getVideoMediaData for {0}: {1}".format(
+                video_url[:120], e
+            )
+        )
+        return
     except Exception as e:
         traceback.print_exc()
         logger.warning("\t  Error in getVideoMediaData \t Error= {0}".format(e))
