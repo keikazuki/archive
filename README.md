@@ -32,7 +32,7 @@ tail -f /home/ubuntu/Desktop/archive/archive.log
 2. Opens a PRAW stream with `reddit.subreddit(SUBREDDITLIST).stream.submissions(pause_after=0)`.
 3. Skips a submission when `submissions.id` already exists.
 4. Resolves media from direct image links, Reddit galleries/previews/videos, Imgur albums, Redgifs, Gfycat, gifs/gifv, crossposts, and self-post URLs.
-5. Hashes images and video frames with `DifferenceHash`.
+5. Skips known generic/low-information media, then hashes images and video frames with `DifferenceHash`.
 6. Inserts rows into `media` and `submissions` in one transaction via `addSubmissionAndMedia`.
 
 `archive.py` is intentionally similar to `archivelimit.py`. If media extraction, hashing, database writes, Redgifs handling, supported domains, logging, or duplicate detection changes here, inspect and usually update `archivelimit` too.
@@ -309,7 +309,18 @@ Important production keys and indexes:
 | `idx_media_sub_id_hash` | B-tree index on `(submission_id, hash)`. |
 | `media_hash_chunk_0_idx` to `media_hash_chunk_4_idx` | Expression indexes used by `repostchecker` to find hash candidates quickly. |
 
-Do not change table columns, hash types, primary keys, or the ignored hash value `9925021303884596990` without updating all shared repos and the production recovery documentation. If a future AI sees live production schema drift, it should update this README and the setup note after confirming the real schema.
+Ignored media behavior:
+
+| Item | Value |
+| --- | --- |
+| Imgur deleted placeholder hash | `9925021303884596990` |
+| Uniform black/white/fade-frame hash | `18446744073709551615` |
+| Low-information sample | 16x16 grayscale image |
+| Low-information thresholds | pixel range `<= 4` or standard deviation `<= 2.0` |
+
+`archive.py` drops low-information images before DB insert. This prevents whole-black, whole-white, and near-uniform transition frames from polluting repost matching. `databasehandler.getAllMedia` also excludes both ignored hashes for compatibility with older code paths.
+
+Do not change table columns, hash types, primary keys, ignored hashes, or low-information thresholds without updating all shared repos and the production recovery documentation. If a future AI sees live production schema drift, it should update this README and the setup note after confirming the real schema.
 
 ## Local Development
 

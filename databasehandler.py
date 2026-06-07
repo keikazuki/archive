@@ -233,7 +233,7 @@ def getAllMedia():
     """
     Returns hash, submission_id, subreddit of all records of media table.
     """
-    query = "SELECT hash, submission_id, subreddit FROM media WHERE frame_count=1 and hash <> '9925021303884596990' and subreddit <> 'ssaavvaaggeekkuunn';"
+    query = "SELECT hash, submission_id, subreddit FROM media WHERE frame_count=1 and hash <> '9925021303884596990' and hash <> '18446744073709551615' and subreddit <> 'ssaavvaaggeekkuunn';"
 
     try:
         ensureDatabaseConnection()

@@ -30,6 +30,13 @@ MEDIA_REQUEST_TIMEOUT = 45
 VIDEO_REQUEST_TIMEOUT = 180
 REDGIFS_VIDEO_URL_FIELDS = ("sd", "hd")
 IGNORED_MEDIA_HASH = "9925021303884596990"
+IGNORED_MEDIA_HASHES = {
+    IGNORED_MEDIA_HASH,  # Imgur generic deleted media image.
+    "18446744073709551615",  # Uniform/flat frame from black/white/fade media.
+}
+LOW_INFORMATION_SAMPLE_SIZE = (16, 16)
+LOW_INFORMATION_RANGE_THRESHOLD = 4
+LOW_INFORMATION_STDDEV_THRESHOLD = 2.0
 IMAGE_EXTENSIONS = (
     ".jpg",
     ".jpeg",
@@ -226,6 +233,18 @@ def DifferenceHash(theImage):
     return differenceHash
 
 
+def is_low_information_image(theImage):
+    sample = theImage.convert("L").resize(
+        LOW_INFORMATION_SAMPLE_SIZE, Image.Resampling.BILINEAR
+    )
+    min_pixel, max_pixel = sample.getextrema()
+    if max_pixel - min_pixel <= LOW_INFORMATION_RANGE_THRESHOLD:
+        return True
+
+    stat = ImageStat.Stat(sample)
+    return stat.stddev[0] <= LOW_INFORMATION_STDDEV_THRESHOLD
+
+
 def _media_request(url):
     return urllib.request.Request(url, headers={"User-Agent": MEDIA_USER_AGENT})
 
@@ -234,7 +253,13 @@ def _image_to_media_data(img, submission, size):
     img.load()
     width, height = img.size
     pixels = width * height
+    if is_low_information_image(img):
+        return None
+
     imgHash = DifferenceHash(img)
+    if str(imgHash) in IGNORED_MEDIA_HASHES:
+        return None
+
     return (
         imgHash,
         str(submission.id),
@@ -310,6 +335,13 @@ def getMediaData(url, submission, image):
             return
 
         mediaData = _image_to_media_data(img, submission, size)
+        if mediaData is None:
+            elapsed = time.time() - start_time
+            logger.info(
+                f"\t [Media] Skipped low-information/ignored image in {elapsed:.2f}s (Size: {size} bytes)"
+            )
+            return
+
         width = mediaData[5]
         height = mediaData[6]
 
@@ -370,9 +402,9 @@ def add_DB_Record(submission, mediaData):
     start_time = time.time()
     mediaRows = []
     if mediaData is not None:
-        # Ignore Imgur generic deleted media data
+        # Ignore known generic and low-information media hashes.
         for media in mediaData:
-            if media is not None and str(media[0]) != IGNORED_MEDIA_HASH:
+            if media is not None and str(media[0]) not in IGNORED_MEDIA_HASHES:
                 mediaRows.append(media)
 
     submissionData = getSubmissionData(len(mediaRows) > 0, submission)
