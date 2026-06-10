@@ -44,6 +44,11 @@ except ImportError:
     pass
 
 
+RECONNECT_MAX_ATTEMPTS = 12
+RECONNECT_BASE_DELAY_SECONDS = 5
+RECONNECT_MAX_DELAY_SECONDS = 60
+
+
 class ArchiveDatabaseError(Exception):
     pass
 
@@ -57,12 +62,64 @@ def connectDatabase():
     cur = conn.cursor()
 
 
+def resetDatabaseConnection():
+    """Close and forget the current connection so the next call reconnects."""
+    global conn, cur
+    try:
+        if conn is not None:
+            conn.close()
+    except Exception:
+        pass
+    conn = None
+    cur = None
+
+
 def ensureDatabaseConnection():
+    """
+    Make sure conn/cur are usable. Reconnects with backoff so transient outages
+    (for example a PostgreSQL restart during system updates) do not abort runs.
+    """
     global cur
-    if conn is None or conn.closed:
-        connectDatabase()
-    elif cur is None or cur.closed:
-        cur = conn.cursor()
+    if conn is not None and not conn.closed:
+        if cur is None or cur.closed:
+            cur = conn.cursor()
+        return
+
+    last_error = None
+    delay = RECONNECT_BASE_DELAY_SECONDS
+    for attempt in range(1, RECONNECT_MAX_ATTEMPTS + 1):
+        try:
+            connectDatabase()
+            if attempt > 1:
+                logger.info(f"\t [DB] Reconnected on attempt {attempt}")
+            return
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                f"\t [DB] Connect attempt {attempt}/{RECONNECT_MAX_ATTEMPTS} failed: {e}; retrying in {delay}s"
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, RECONNECT_MAX_DELAY_SECONDS)
+    raise ArchiveDatabaseError(
+        "Database unavailable after reconnect retries"
+    ) from last_error
+
+
+def runDatabaseOperation(operation):
+    """
+    Run a callable that uses the module connection/cursor. If the connection
+    dropped mid-query, reconnect (with backoff) and retry the operation once.
+    """
+    try:
+        ensureDatabaseConnection()
+        return operation()
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        logger.warning(
+            f"\t [DB] Connection lost during operation; reconnecting to retry: {e}"
+        )
+        resetDatabaseConnection()
+        ensureDatabaseConnection()
+        return operation()
 
 
 try:
@@ -82,10 +139,12 @@ def submissionExists(submissionid):
     """
     query = "SELECT 1 FROM submissions WHERE id = %s LIMIT 1;"
 
-    try:
-        ensureDatabaseConnection()
+    def _operation():
         cur.execute(query, (submissionid,))
-        exists = (cur.fetchone()) is not None
+        return (cur.fetchone()) is not None
+
+    try:
+        exists = runDatabaseOperation(_operation)
         logger.debug(f"\t [DB] Submission {submissionid} exists: {exists}")
         return exists
     except Exception as e:
@@ -101,11 +160,13 @@ def getArchieveSubredditsList():
     start_time = time.time()
     query = "SELECT subreddit FROM indexsubreddits;"
 
-    try:
-        ensureDatabaseConnection()
-        sublist = []
+    def _operation():
         cur.execute(query)
-        subredditslist = cur.fetchall()
+        return cur.fetchall()
+
+    try:
+        sublist = []
+        subredditslist = runDatabaseOperation(_operation)
         for item in subredditslist:
             if item[0]:
                 sublist.append(str(item[0]))
@@ -128,11 +189,13 @@ def getRepostCheckerList():
     start_time = time.time()
     query = "SELECT subreddit FROM checksubreddits;"
 
-    try:
-        ensureDatabaseConnection()
-        sublist = []
+    def _operation():
         cur.execute(query)
-        subredditslist = cur.fetchall()
+        return cur.fetchall()
+
+    try:
+        sublist = []
+        subredditslist = runDatabaseOperation(_operation)
         for item in subredditslist:
             if item[0]:
                 sublist.append(str(item[0]))
@@ -157,14 +220,19 @@ def addSubmission(submissionData):
         submissionData[1] if submissionData and len(submissionData) > 1 else "unknown"
     )
 
-    try:
-        ensureDatabaseConnection()
+    def _operation():
         cur.execute(SUBMISSION_INSERT_QUERY, submissionData)
+
+    try:
+        runDatabaseOperation(_operation)
         logger.debug(f"\t [DB] Added submission {submission_id} ({subreddit})")
     except Exception as e:
         traceback.print_exc()
-        if conn is not None and not conn.closed:
-            conn.rollback()
+        try:
+            if conn is not None and not conn.closed:
+                conn.rollback()
+        except Exception:
+            pass
         logger.warning(f"\t [DB] Failed to add submission {submission_id}: {e}")
 
 
@@ -174,15 +242,20 @@ def addMedia(mediaData):
     """
     submission_id = mediaData[1] if mediaData and len(mediaData) > 1 else "unknown"
 
-    try:
-        ensureDatabaseConnection()
+    def _operation():
         execute_values(cur, MEDIA_INSERT_QUERY, [mediaData], page_size=1)
+
+    try:
+        runDatabaseOperation(_operation)
         logger.debug(f"\t [DB] Added media hash for submission {submission_id}")
         return True
     except Exception as e:
         traceback.print_exc()
-        if conn is not None and not conn.closed:
-            conn.rollback()
+        try:
+            if conn is not None and not conn.closed:
+                conn.rollback()
+        except Exception:
+            pass
         logger.warning(
             f"\t [DB] Failed to add media for submission {submission_id}: {e}"
         )
@@ -196,37 +269,47 @@ def addSubmissionAndMedia(submissionData, mediaRows):
     start_time = time.time()
     mediaRows = [media for media in mediaRows if media is not None]
     submission_id = submissionData[0] if submissionData else "unknown"
-    previous_autocommit = None
 
-    try:
-        ensureDatabaseConnection()
+    def _operation():
         previous_autocommit = conn.autocommit
         conn.autocommit = False
+        try:
+            if mediaRows:
+                execute_values(cur, MEDIA_INSERT_QUERY, mediaRows, page_size=100)
 
-        if mediaRows:
-            execute_values(cur, MEDIA_INSERT_QUERY, mediaRows, page_size=100)
+            if submissionData is not None:
+                cur.execute(SUBMISSION_INSERT_QUERY, submissionData)
 
-        if submissionData is not None:
-            cur.execute(SUBMISSION_INSERT_QUERY, submissionData)
+            conn.commit()
+        except Exception:
+            try:
+                if conn is not None and not conn.closed:
+                    conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                if conn is not None and not conn.closed:
+                    conn.autocommit = previous_autocommit
+            except Exception:
+                pass
+        return len(mediaRows) > 0
 
-        conn.commit()
+    try:
+        mediaprocessed = runDatabaseOperation(_operation)
         elapsed = time.time() - start_time
         logger.info(
             f"\t [DB] Committed submission {submission_id} with {len(mediaRows)} media row(s) in {elapsed:.3f}s"
         )
-        return len(mediaRows) > 0
+        return mediaprocessed
     except Exception as e:
-        if conn is not None and not conn.closed:
-            conn.rollback()
         traceback.print_exc()
         elapsed = time.time() - start_time
         logger.warning(
             f"\t [DB] Failed to commit submission {submission_id} after {elapsed:.3f}s: {e}"
         )
         return False
-    finally:
-        if previous_autocommit is not None and conn is not None and not conn.closed:
-            conn.autocommit = previous_autocommit
 
 
 def getAllMedia():
@@ -235,10 +318,12 @@ def getAllMedia():
     """
     query = "SELECT hash, submission_id, subreddit FROM media WHERE frame_count=1 and hash <> '9925021303884596990' and hash <> '18446744073709551615' and subreddit <> 'ssaavvaaggeekkuunn';"
 
-    try:
-        ensureDatabaseConnection()
+    def _operation():
         cur.execute(query)
-        rows = cur.fetchall()
+        return cur.fetchall()
+
+    try:
+        rows = runDatabaseOperation(_operation)
         logger.debug(f"\t [DB] Loaded {len(rows)} media row(s)")
         return rows
     except Exception as e:
@@ -255,10 +340,12 @@ def getSubmission(submissionid):
         "SELECT id, subreddit, timestamp, author, title FROM submissions WHERE id = %s;"
     )
 
-    try:
-        ensureDatabaseConnection()
+    def _operation():
         cur.execute(query, (submissionid,))
-        submission = cur.fetchone()
+        return cur.fetchone()
+
+    try:
+        submission = runDatabaseOperation(_operation)
         logger.debug(
             f"\t [DB] Loaded submission {submissionid}: {submission is not None}"
         )
@@ -275,10 +362,12 @@ def commentExists(commentid):
     """
     query = "SELECT 1 FROM mentions WHERE commentid = %s LIMIT 1;"
 
-    try:
-        ensureDatabaseConnection()
+    def _operation():
         cur.execute(query, (commentid,))
-        exists = (cur.fetchone()) is not None
+        return (cur.fetchone()) is not None
+
+    try:
+        exists = runDatabaseOperation(_operation)
         logger.debug(f"\t [DB] Comment {commentid} exists: {exists}")
         return exists
     except Exception as e:
@@ -293,14 +382,19 @@ def addComment(commentid, submission_id, type, requester, subreddit):
     """
     query = "INSERT INTO mentions(commentid, submission_id, type, requester, subreddit) VALUES(%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING;"
 
-    try:
-        ensureDatabaseConnection()
+    def _operation():
         cur.execute(query, (commentid, submission_id, type, requester, subreddit))
+
+    try:
+        runDatabaseOperation(_operation)
         logger.debug(
             f"\t [DB] Added comment {commentid} for submission {submission_id}"
         )
     except Exception as e:
         traceback.print_exc()
-        if conn is not None and not conn.closed:
-            conn.rollback()
+        try:
+            if conn is not None and not conn.closed:
+                conn.rollback()
+        except Exception:
+            pass
         logger.warning(f"\t [DB] Failed to add comment {commentid}: {e}")

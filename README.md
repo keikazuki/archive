@@ -37,6 +37,14 @@ tail -f /home/ubuntu/Desktop/archive/archive.log
 
 `archive.py` is intentionally similar to `archivelimit.py`. If media extraction, hashing, database writes, Redgifs handling, supported domains, logging, or duplicate detection changes here, inspect and usually update `archivelimit` too.
 
+## Fail-Safe Behavior
+
+Hardened on 2026-06-10 together with `archivelimit` and `repostchecker` after a PostgreSQL restart during a system maintenance window:
+
+- `databasehandler.ensureDatabaseConnection` reconnects with exponential backoff (12 attempts, 5s doubling to 60s, ~9 minutes total) instead of failing on the first refused connection.
+- Every DB function runs through `runDatabaseOperation`, which reconnects and retries the statement once when the connection drops mid-query.
+- The startup `reddit.user.me()` call now lives inside the `while 1` retry loop so a transient Reddit/network failure at boot cannot crash the service before streaming starts.
+
 ## Current Production Subreddits
 
 This repo processes the current rows of `indexsubreddits`. Production had 242 rows on 2026-06-06:

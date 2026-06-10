@@ -1343,10 +1343,12 @@ if __name__ == "__main__":
     logger.info("ARCHIVE STARTED")
     logger.info("=" * 70)
     logger.info(f"\t [Start] Monitoring subreddits: {str(SUBREDDITLIST)[:100]}...")
-    logger.info(f"\t [Start] Connected to Reddit as u/{reddit.user.me()}")
 
     while 1:
         try:
+            # Inside the retry loop so a transient Reddit/network failure at
+            # boot cannot crash the service before streaming starts.
+            logger.info(f"\t [Start] Connected to Reddit as u/{reddit.user.me()}")
             start()
         except TooManyRequests as e:
             headers = e.response.headers if e.response is not None else {}
@@ -1365,5 +1367,6 @@ if __name__ == "__main__":
             logger.warning("\t  Error in __main__ \t Error= {0}".format(e))
             time.sleep(60)
         except Exception as e:
+            traceback.print_exc()
             logger.warning("\t  Error in __main__ \t Error= {0}".format(e))
             time.sleep(60)
